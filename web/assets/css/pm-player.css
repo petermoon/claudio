@@ -1,0 +1,17 @@
+#imgdiv {
+  width: 300px;
+  height: 300px;
+  font-size: 300px;
+}
+
+#imgdiv > img {
+  height: 100%;
+}
+
+img .hide {
+  display: none;
+}
+
+img .show {
+  display: block;
+}
