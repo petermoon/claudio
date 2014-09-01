@@ -15,32 +15,47 @@
     <script src="https://sdk.amazonaws.com/js/aws-sdk-2.0.15.min.js"></script>
     <script src='assets/js/jstree.min.js'></script>
     <script src='assets/js/pm-config.js'></script>
-    <script>
+</head>
+
+<body>
+    <div id="imgdiv" class="glyphicon glyphicon-headphones">
+        <img id="img" class="hide"></img>
+    </div>
+    <div>
+        <audio controls></audio>
+    </div>
+    <div>
+        <input type="checkbox" id="repeatCheck"></input>
+        Repeat?
+    </div>
+    <div>
+        <input type="checkbox" id="randomCheck"></input>
+        Random?
+    </div>
+    <div id="jstree">
+    </div>
+    <div id="fb-root"></div>
+    <script type="text/javascript">
     AWS.config.logger = console;
-    AWS.config.credentials = new AWS.Credentials(pmConfig.accessKeyId, pmConfig.secretAccessKey);
-    AWS.config.credentials = new AWS.TemporaryCredentials({
-        RoleArn: pmConfig.roleArn
-    });
+    AWS.config.region = pmConfig.region;
+
     var bkt = new AWS.S3({
         params: {
             Bucket: pmConfig.bucket
-        },
-        region: pmConfig.region
+        }
     });
-
     var bktSync = new AWS.S3({
         params: {
             Bucket: pmConfig.bucket
         },
-        region: pmConfig.region,
         httpOptions: {
             xhrAsync: false
         }
     });
 
+    var fbUserId;
     var topNodeId = '__top_node__';
     var stateObjectKey = '__player_state__';
-    var hasUnloaded = false;
     var state = {};
     var playingId;
     var idToStartPlaying;
@@ -105,7 +120,7 @@
                 var treeData = new Array();
                 $.each(data.Contents, function(index, v) {
                     var key = v.Key;
-                    console.log(key);
+
                     if (key !== stateObjectKey) {
                         var pieces = key.split('/');
                         var node = treeData;
@@ -171,13 +186,10 @@
         });
     }
 
-
-
     function playId(id) {
         //return true if node is audio and player src is set.
         //return false if node is not audio.
         var key = $('#jstree').jstree('get_path', id, '/');
-        console.log('trying: ' + key);
         if (isKeyType(key, 'audio')) {
             var params = {
                 Key: key,
@@ -186,8 +198,6 @@
             var url = bkt.getSignedUrl('getObject', params);
             $('audio').attr('src', url);
             playingId = id;
-            console.log(state);
-            console.log('playing: ' + key);
 
             //visually select the next audio without triggering the select event
             $('#jstree').jstree('deselect_all', true);
@@ -241,7 +251,9 @@
     }
 
     //initialize tree and load music list
-    $(document).ready(function() {
+
+    function init() {
+
         //cache state on change
         $('#repeatCheck').on('change', cacheState);
         $('#randomCheck').on('change', cacheState);
@@ -298,27 +310,45 @@
 
         //fetch state and then load the library
         fetchState();
-    });
+    }
+    /*!
+     * Login to your application using Facebook.
+     * Uses the Facebook SDK for JavaScript available here:
+     * https://developers.facebook.com/docs/javascript/gettingstarted/
+     */
+    window.fbAsyncInit = function() {
+        FB.init({
+            appId: pmConfig.facebookAppId
+        });
+        FB.login(function(response) {
+            try {
+                AWS.config.credentials = new AWS.WebIdentityCredentials({
+                    ProviderId: 'graph.facebook.com',
+                    RoleArn: pmConfig.roleArn,
+                    WebIdentityToken: response.authResponse.accessToken,
+                    DurationSeconds: 900
+                });
+                bkt.config.credentials = AWS.config.credentials;
+                bktSync.config.credentials = AWS.config.credentials;
+                fbUserId = response.authResponse.userID;
+                init();
+            } catch (e) {
+                window.alert(e);
+            }
+        });
+    };
+    // Load the Facebook SDK asynchronously
+    (function(d, s, id) {
+        var js, fjs = d.getElementsByTagName(s)[0];
+        if (d.getElementById(id)) {
+            return;
+        }
+        js = d.createElement(s);
+        js.id = id;
+        js.src = "//connect.facebook.net/en_US/all.js";
+        fjs.parentNode.insertBefore(js, fjs);
+    }(document, 'script', 'facebook-jssdk'));
     </script>
-</head>
-
-<body>
-    <div id="imgdiv" class="glyphicon glyphicon-headphones">
-        <img id="img" class="hide"></img>
-    </div>
-    <div>
-        <audio controls></audio>
-    </div>
-    <div>
-        <input type="checkbox" id="repeatCheck"></input>
-        Repeat?
-    </div>
-    <div>
-        <input type="checkbox" id="randomCheck"></input>
-        Random?
-    </div>
-    <div id="jstree">
-    </div>
 </body>
 
 </html>
