@@ -1,2 +1,3 @@
 .DS_Store 
-web/assets/js/pm-config.js
+web/assets/js/claudio-config.js
+setup/node_modules

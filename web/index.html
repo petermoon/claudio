@@ -10,48 +10,65 @@
 
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
     <link rel='stylesheet' href='assets/css/style.css' />
-    <link rel='stylesheet' href='assets/css/pm-player.css' />
+    <link rel='stylesheet' href='assets/css/claudio.css' />
     <script src="https://code.jquery.com/jquery-1.11.0.min.js"></script>
     <script src="https://sdk.amazonaws.com/js/aws-sdk-2.0.15.min.js"></script>
     <script src='assets/js/jstree.min.js'></script>
-    <script src='assets/js/pm-config.js'></script>
+    <script src='assets/js/claudio-config.js'></script>
 </head>
 
 <body>
     <div id="imgdiv" class="glyphicon glyphicon-headphones">
         <img id="img" class="hide"></img>
     </div>
-    <div>
-        <audio controls></audio>
-    </div>
-    <div>
-        <input type="checkbox" id="repeatCheck"></input>
-        Repeat?
-    </div>
-    <div>
-        <input type="checkbox" id="randomCheck"></input>
-        Random?
-    </div>
+    <fb:login-button autologoutlink="true"></fb:login-button>
     <div id="jstree">
+    </div>
+    <div id="marginDiv">
+    </div>
+    <div id="audioDiv">
+        <audio controls></audio>
+        <div>
+            <input type="checkbox" id="repeatCheck">Repeat?</input>
+        </div>
+        <div>
+            <input type="checkbox" id="randomCheck">Random?</input>
+        </div>
     </div>
     <div id="fb-root"></div>
     <script type="text/javascript">
-    AWS.config.logger = console;
-    AWS.config.region = pmConfig.region;
+    var bkt, bktSync;
 
-    var bkt = new AWS.S3({
-        params: {
-            Bucket: pmConfig.bucket
-        }
-    });
-    var bktSync = new AWS.S3({
-        params: {
-            Bucket: pmConfig.bucket
-        },
-        httpOptions: {
-            xhrAsync: false
-        }
-    });
+    function awsInit() {
+        AWS.config.logger = console;
+        AWS.config.region = claudioConfig.region;
+        bkt = new AWS.S3({
+            params: {
+                Bucket: claudioConfig.bucket
+            }
+        });
+        bktSync = new AWS.S3({
+            params: {
+                Bucket: claudioConfig.bucket
+            },
+            httpOptions: {
+                xhrAsync: false
+            }
+        });
+    }
+
+    function loadCreds(fbToken) {
+        var creds = new AWS.WebIdentityCredentials({
+            ProviderId: 'graph.facebook.com',
+            RoleArn: claudioConfig.roleArn,
+            WebIdentityToken: fbToken,
+            DurationSeconds: 900
+        });
+        creds.service.config.httpOptions.xhrAsync = false;
+        AWS.config.credentials = creds;
+        if (bkt) bkt.config.credentials = creds;
+        if (bktSync) bktSync.config.credentials = creds;
+    }
 
     var fbUserId;
     var topNodeId = '__top_node__';
@@ -85,14 +102,16 @@
     }
 
     function storeState() {
-        if (playingId) {
-            state.playingKey = $('#jstree').jstree('get_path', playingId, '/');
+        return function() {
+            if (playingId) {
+                state.playingKey = $('#jstree').jstree('get_path', playingId, '/');
+            }
+            console.log("Storing: " + state);
+            bktSync.putObject({
+                Key: stateObjectKey,
+                Body: JSON.stringify(state)
+            }).send();
         }
-        console.log(state);
-        bktSync.putObject({
-            Key: stateObjectKey,
-            Body: JSON.stringify(state)
-        }).send();
     }
 
     function fetchState() {
@@ -106,7 +125,7 @@
             console.log('Error: failed to get previous state')
         } else {
             state = JSON.parse(data.Body);
-            console.log(state);
+            console.log("Retrieved: " + state);
             $('#repeatCheck').prop('checked', state.repeat);
             $('#randomCheck').prop('checked', state.random);
         }
@@ -193,7 +212,7 @@
         if (isKeyType(key, 'audio')) {
             var params = {
                 Key: key,
-                Expires: 9000
+                Expires: 3600
             };
             var url = bkt.getSignedUrl('getObject', params);
             $('audio').attr('src', url);
@@ -253,7 +272,7 @@
     //initialize tree and load music list
 
     function init() {
-
+        awsInit();
         //cache state on change
         $('#repeatCheck').on('change', cacheState);
         $('#randomCheck').on('change', cacheState);
@@ -261,7 +280,7 @@
             $('audio').prop('autoplay', true);
             $('audio').off('play');
         });
-        $(window).on('unload', storeState);
+        $(window).on('unload', storeState());
 
         //logic for loading the next song
         $('audio').on('ended', function() {
@@ -308,32 +327,65 @@
             }
         }, 5000);
 
+        //Subcribe to Facebook auth event for refreshing creds
+        FB.Event.subscribe('auth.authResponseChange', function(resp) {
+            console.log('authResponse changed');
+            console.log(resp);
+            if (resp.authResponse && resp.authResponse.accessToken) {
+                loadCreds(resp.authResponse.accessToken);
+            } else {
+                FB.login(function(response) {
+                    try {
+                        loadCreds(response.authResponse.accessToken);
+                        fbUserId = response.authResponse.userID;
+                        init();
+                    } catch (e) {
+                        window.alert(e);
+                    }
+                });
+            }
+        });
+
         //fetch state and then load the library
         fetchState();
     }
-    /*!
-     * Login to your application using Facebook.
-     * Uses the Facebook SDK for JavaScript available here:
-     * https://developers.facebook.com/docs/javascript/gettingstarted/
-     */
+
     window.fbAsyncInit = function() {
         FB.init({
-            appId: pmConfig.facebookAppId
+            appId: claudioConfig.facebookAppId,
+            xfbml: true,
+            version: 'v2.1'
         });
-        FB.login(function(response) {
-            try {
-                AWS.config.credentials = new AWS.WebIdentityCredentials({
-                    ProviderId: 'graph.facebook.com',
-                    RoleArn: pmConfig.roleArn,
-                    WebIdentityToken: response.authResponse.accessToken,
-                    DurationSeconds: 900
+        FB.getLoginStatus(function(response) {
+            console.log(response);
+            if (response.status === 'connected') {
+                // the user is logged in and has authenticated your
+                // app, and response.authResponse supplies
+                // the user's ID, a valid access token, a signed
+                // request, and the time the access token 
+                // and signed request each expire
+                console.log('Already logged in.')
+                var uid = response.authResponse.userID;
+                var accessToken = response.authResponse.accessToken;
+                try {
+                    loadCreds(accessToken);
+                    fbUserId = response.authResponse.userID;
+                    init();
+                } catch (e) {
+                    window.alert(e);
+                }
+            } else {
+                // the user isn't logged in to Facebook.
+                console.log('Not logged in. Logging in...')
+                FB.login(function(response) {
+                    try {
+                        // loadCreds(response.authResponse.accessToken);
+                        fbUserId = response.authResponse.userID;
+                        init();
+                    } catch (e) {
+                        window.alert(e);
+                    }
                 });
-                bkt.config.credentials = AWS.config.credentials;
-                bktSync.config.credentials = AWS.config.credentials;
-                fbUserId = response.authResponse.userID;
-                init();
-            } catch (e) {
-                window.alert(e);
             }
         });
     };
