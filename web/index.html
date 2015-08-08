@@ -84,6 +84,20 @@
         }
     }
 
+    function reloadCreds(fbResponse) {
+        var fbToken = fbResponse.authResponse.accessToken;
+        try {
+            AWS.config.credentials.params.WebIdentityCredentials = fbToken;
+            AWS.config.credentials.refresh();
+            bkt.config.credentials.params.WebIdentityCredentials = fbToken;
+            bkt.config.credentials.refresh();
+            bktSync.config.credentials.params.WebIdentityCredentials = fbToken;
+            bktSync.config.credentials.refresh();
+        } catch (e) {
+            window.alert(e);
+        }
+    }
+
     var fbUserId;
     var topNodeId = '__top_node__';
     var stateObjectKey = '__player_state__';
@@ -359,10 +373,11 @@
             console.log('authResponse changed');
             console.log(resp);
             if (resp.authResponse && resp.authResponse.accessToken) {
-                loadCreds(resp);
+                console.log('reloading creds...');
+                reloadCreds(resp);
             } else {
                 FB.login(function(response) {
-                    loadCreds(response);
+                    reloadCreds(response);
                 });
             }
         });
