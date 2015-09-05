@@ -87,11 +87,11 @@
     function reloadCreds(fbResponse) {
         var fbToken = fbResponse.authResponse.accessToken;
         try {
-            AWS.config.credentials.params.WebIdentityCredentials = fbToken;
+            AWS.config.credentials.params.Logins['graph.facebook.com'] = fbToken;
             AWS.config.credentials.refresh();
-            bkt.config.credentials.params.WebIdentityCredentials = fbToken;
+            bkt.config.credentials.params.Logins['graph.facebook.com'] = fbToken;
             bkt.config.credentials.refresh();
-            bktSync.config.credentials.params.WebIdentityCredentials = fbToken;
+            bktSync.config.credentials.params.Logins['graph.facebook.com'] = fbToken;
             bktSync.config.credentials.refresh();
         } catch (e) {
             window.alert(e);
