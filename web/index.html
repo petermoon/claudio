@@ -2,18 +2,19 @@
 <html>
 
 <head>
-    <meta charset='utf-8'>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>
         pmoon's Audio Player using AWS SDK for JavaScript in the Browser
     </title>
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
-    <link rel='stylesheet' href='assets/css/style.css' />
-    <link rel='stylesheet' href='assets/css/claudio.css' />
+    <link rel="stylesheet" href="assets/css/style.css" />
+    <link rel="stylesheet" href="assets/css/claudio.css" />
     <script src="//code.jquery.com/jquery-1.11.0.min.js"></script>
-    <script src="//sdk.amazonaws.com/js/aws-sdk-2.1.34.min.js"></script>
-    <script src='assets/js/jstree.min.js'></script>
-    <script src='assets/js/claudio-config.js'></script>
+    <script src="//sdk.amazonaws.com/js/aws-sdk-2.1.49.min.js"></script>
+    <script src="assets/js/jstree.min.js"></script>
+    <script src="assets/js/claudio-config.js"></script>
+    <script src="assets/js/md5.min.js"></script>
 </head>
 
 <body>
@@ -99,14 +100,13 @@
     }
 
     var fbUserId;
-    var topNodeId = '__top_node__';
     var stateObjectKey = '__player_state__';
     var state = {};
     var playingId;
     var idToStartPlaying;
     var imageParent, imageUrls = new Array(),
         imageNextIndex, interval;
-    var audioNodeIds;
+    var audioNodeIds, treeData;
     var extentions = {
         audio: [/.mp3$/, /.ogg$/, /.m4a$/],
         image: [/.png$/, /.jpe?g$/, /.giff?$/, /.bmp$/]
@@ -173,77 +173,83 @@
 
         //load song list
         audioNodeIds = new Array();
-        bkt.listObjects(null, function(err, data) {
-            if (err) {
-                console.log(err);
-            } else {
-                var treeData = new Array();
-                $.each(data.Contents, function(index, v) {
-                    var key = v.Key;
+        treeData = {
+            text: 'Top Node',
+            children: []
+        };
+        var req = bkt.listObjects(null, handleListObjectsPage);
+        req.eachPage(handleListObjectsPage);
+    }
 
-                    if (!key.startsWith(stateObjectKey)) {
-                        var pieces = key.split('/');
-                        var node = treeData;
-                        for (var i = 0; i < pieces.length; i++) {
-                            node = getChildNodeByText(node, pieces[i]);
-                            if (index === 0 && i === 0) {
-                                node.id = topNodeId;
+    function handleListObjectsPage(err, data) {
+        if (err) {
+            console.log(err);
+        } else if (data) {
+            // Still more pages to process
+            $.each(data.Contents, function(index, v) {
+                var key = v.Key;
+
+                if (!key.startsWith(stateObjectKey)) {
+                    var pieces = key.split('/');
+                    var node = treeData;
+                    for (var i = 0; i < pieces.length; i++) {
+                        node = getChildNodeByText(node, pieces[i]);
+                        if (isKeyType(pieces[i], 'audio')) {
+                            node.type = 'audio';
+                            node.id = md5(key);
+                            console.log(node.id);
+                            audioNodeIds.push(node.id);
+                            //if the current node is the song stored in the state, 
+                            //note the id to start playing once the tree's ready
+                            if (state.playingKey && key === state.playingKey) {
+                                idToStartPlaying = node.id;
                             }
-                            if (isKeyType(pieces[i], 'audio')) {
-                                node.type = 'audio';
-                                node.id = 'audio_' + index + '_' + i;
-                                audioNodeIds.push(node.id);
-                                //if the current node is the song stored in the state, 
-                                //note the id to start playing once the tree's ready
-                                if (state.playingKey && key === state.playingKey) {
-                                    idToStartPlaying = node.id;
-                                }
-                            } else if (isKeyType(pieces[i], 'image')) {
-                                node.type = 'image';
-                            }
+                        } else if (isKeyType(pieces[i], 'image')) {
+                            node.type = 'image';
                         }
                     }
-                });
-                $('#jstree').jstree({
-                    'plugins': ['types'], //'dnd'], drag n drop not working well for touch screen devices. should fix when playlist feature is added.
-                    'core': {
-                        'themes': {
-                            'variant': 'small',
-                            'stripes': true,
-                            'icons': true
-                        },
-                        'data': treeData
+                }
+            });
+        } else {
+            // last page has been reached. construct the jstree.
+            $('#jstree').jstree({
+                'plugins': ['types'], //'dnd'], drag n drop not working well for touch screen devices. should fix when playlist feature is added.
+                'core': {
+                    'themes': {
+                        'variant': 'small',
+                        'stripes': true,
+                        'icons': true
                     },
-                    'types': {
-                        'default': {
-                            'icon': 'glyphicon glyphicon-folder-close'
-                        },
-                        'audio': {
-                            'icon': 'glyphicon glyphicon-headphones',
-                            'valid_children': []
-                        },
-                        'image': {
-                            'icon': 'glyphicon glyphicon-picture',
-                            'valid_children': []
-                        }
+                    'data': treeData.children
+                },
+                'types': {
+                    'default': {
+                        'icon': 'glyphicon glyphicon-folder-close'
+                    },
+                    'audio': {
+                        'icon': 'glyphicon glyphicon-headphones',
+                        'valid_children': []
+                    },
+                    'image': {
+                        'icon': 'glyphicon glyphicon-picture',
+                        'valid_children': []
                     }
-                });
+                }
+            });
+            //add event listener to play the selected item when selection changes
+            $('#jstree').on('changed.jstree', function(e, data) {
+                if (data.selected.length > 0) {
+                    playId(data.selected[0]);
+                }
+            });
 
-                //add event listener to play the selected item when selection changes
-                $('#jstree').on('changed.jstree', function(e, data) {
-                    if (data.selected.length > 0) {
-                        playId(data.selected[0]);
-                    }
-                });
-
-                //add event listener to start playing the song stored in previous state when the tree is ready
-                $('#jstree').on('ready.jstree', function(err, data) {
-                    if (idToStartPlaying) {
-                        playId(idToStartPlaying);
-                    }
-                });
-            }
-        });
+            //add event listener to start playing the song stored in previous state when the tree is ready
+            $('#jstree').on('ready.jstree', function(err, data) {
+                if (idToStartPlaying) {
+                    playId(idToStartPlaying);
+                }
+            });
+        }
     }
 
     function playId(id) {
@@ -293,21 +299,19 @@
 
     function getChildNodeByText(node, text) {
         //gets or creates tree structure for jstree to render
-        if (!(node instanceof Array)) {
-            node = node.children;
-        }
-        if (node.length > 0) {
-            for (var i = 0; i < node.length; i++) {
-                if (node[i].text === text) {
-                    return node[i];
+        var children = node.children;
+        if (children.length > 0) {
+            for (var i = 0; i < children.length; i++) {
+                if (children[i].text === text) {
+                    return children[i];
                 }
             }
         }
-        node.push({
+        children.push({
             text: text,
             children: []
         });
-        return node[node.length - 1];
+        return children[children.length - 1];
     }
 
     //initialize tree and load music list
@@ -332,6 +336,7 @@
                 var randId = audioNodeIds[randIndex];
                 playId(randId);
             } else if (playingId) {
+                $('#jstree').jstree('open_node', playingId);
                 var nextId = $('#jstree').jstree('get_next_dom', playingId).attr('id');
                 while (nextId && !playId(nextId)) {
                     if ($('#jstree').jstree('is_parent', nextId)) {
@@ -339,7 +344,7 @@
                     }
                     nextId = $('#jstree').jstree('get_next_dom', nextId).attr('id');
                     if (!nextId) {
-                        nextId = topNodeId;
+                        nextId = treeData.children[0].id;
                     }
                 }
             }
