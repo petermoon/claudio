@@ -20,3 +20,4 @@ Planned features in tentative priority order include
 + Playlist and status syncing across devices
 + Styling
 
+[Test](https://askcli.s3.amazonaws.com/ask-cli-dest.mp4)
